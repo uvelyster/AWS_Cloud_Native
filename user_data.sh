@@ -11,4 +11,4 @@ sudo ./install auto
 sudo systemctl start codedeploy-agent 
 rm install
 #sudo amazon-linux-extras install java-openjdk11 -y
-sudo yum install java-17-amazon-corretto
+sudo yum install java-17-amazon-corretto -y
