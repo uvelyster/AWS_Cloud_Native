@@ -198,7 +198,8 @@ resource "aws_autoscaling_group" "example" {
   vpc_zone_identifier = [aws_subnet.my_subnet_a.id, aws_subnet.my_subnet_c.id]
   target_group_arns = [aws_lb_target_group.asg.arn]
   min_size = 1
-  max_size = 10
+  max_size = 3
+  desired_capacity   = 2
   health_check_type = "ELB"
   tag {
     key = "Name"
