@@ -1,288 +1,511 @@
-# provider 설정
 provider "aws" {
-  region = "ap-northeast-1" # 리전 변경
+  //access_key = "YOUR_ACCESS_KEY"
+  // secret_key = "YOUR_SECRET_KEY"
 }
 
-# VPC 생성
-resource "aws_vpc" "my_vpc" {
-  cidr_block = "10.0.0.0/16" # VPC CIDR 블록 설정
-
-  tags = {
-    Name = "terraform-vpc"
-    managedby = "terraform"
-  }
+/*
+* VPC ID , change the VPC ID for your infrastructure
+*/
+variable "vpc_id" {
+  type        = string
+  description = "VPC id for your AWS environment"
+  default     = "vpc-1a5f0f7d"
 }
 
-# 인터넷 게이트웨이 생성
-resource "aws_internet_gateway" "my_igw" {
-  vpc_id = aws_vpc.my_vpc.id
-
-  tags = {
-    Name = "terraform-igw"
-    managedby = "terraform"
-  }
+/*
+* List of availability zone where you want to create the infrastructure
+*/
+variable "availability_zones" {
+  type    = list(any)
+  default = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1e"]
 }
 
-# 라우팅 테이블 생성
-resource "aws_route_table" "my_route_table" {
-  vpc_id = aws_vpc.my_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0" # 모든 트래픽을 IGW로 전달
-    gateway_id = aws_internet_gateway.my_igw.id
-  }
-
-  tags = {
-    Name = "terraform-rt"
-    managedby = "terraform"
-  }
+/*
+* List of subnets within the VPC and where you want to create infrastructure.
+*/
+variable "subnets" {
+  type        = list(any)
+  description = "Provide list of subnets"
+  default     = ["subnet-5f4d9016", "subnet-1b1af940", "subnet-56502833"]
 }
 
-# 서브넷 생성 - 가용 영역 A
-resource "aws_subnet" "my_subnet_a" {
-  vpc_id            = aws_vpc.my_vpc.id
-  cidr_block        = "10.0.1.0/24" # 서브넷 CIDR 블록 설정
-  availability_zone = "ap-northeast-1a"
-  map_public_ip_on_launch = true
-  tags = {
-    Name = "terraform-a"
-    managedby = "terraform"
-  }
+/**
+* Container image URI for deployment
+*/
+variable "container_image_uri" {
+  type        = string
+  description = "Please provide ECR container image URI for deployment"
+  default     = "279522866734.dkr.ecr.us-east-1.amazonaws.com/packt-ecr-repo:aws-code-pipeline"
 }
 
-# 서브넷 생성 - 가용 영역 C
-resource "aws_subnet" "my_subnet_c" {
-  vpc_id            = aws_vpc.my_vpc.id
-  cidr_block        = "10.0.2.0/24" # 서브넷 CIDR 블록 설정
-  availability_zone = "ap-northeast-1c"
-map_public_ip_on_launch = true
-  tags = {
-    Name = "terraform-c"
-    managedby = "terraform"
-  }
-}
-
-# 가용 영역 A의 서브넷과 라우팅 테이블 연결
-resource "aws_route_table_association" "my_route_table_association_a" {
-  subnet_id      = aws_subnet.my_subnet_a.id
-  route_table_id = aws_route_table.my_route_table.id
-}
-
-# 가용 영역 C의 서브넷과 라우팅 테이블 연결
-resource "aws_route_table_association" "my_route_table_association_c" {
-  subnet_id      = aws_subnet.my_subnet_c.id
-  route_table_id = aws_route_table.my_route_table.id
-}
-
-resource "aws_iam_policy" "deploy_policy" {
-  name   = "deploy-policy"
-  policy = file("code-deploy-policy.json")
-}
-
-resource "tls_private_key" "test_key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-resource "aws_key_pair" "test_keypair" {
-  key_name   = "deploy-demo-keypair"
-  public_key = tls_private_key.test_key.public_key_openssh
-} 
-
-resource "local_file" "test_local" {
-  filename        = "./keypair/deploy-demo-keypair.pem"
-  content         = tls_private_key.test_key.private_key_pem
-  file_permission = "0400"
-}
-
-//IAM EC2 Role and S3 Policy association
-resource "aws_iam_policy_attachment" "deploy_policy_attach" {
-  name       = "deploy-policy-attach"
-  policy_arn = aws_iam_policy.deploy_policy.arn
-  roles      = [aws_iam_role.deploy_agent_role.name]
-}
-
-resource "aws_iam_role" "deploy_agent_role" {
-  name               = "deploy_agent_role"
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-  {
-    "Action": "sts:AssumeRole",
-    "Principal": {
-      "Service": "ec2.amazonaws.com"
-    },
-    "Effect": "Allow",
-    "Sid": ""
-  }
-  ]
-}
-EOF
-}
-
-resource "aws_iam_role" "code_deployer_role" {
-    name                = "code_deployer_role"
-    assume_role_policy  = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "",
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "codedeploy.amazonaws.com"
-               },
-            "Action": "sts:AssumeRole"
-        }
+/**
+* Code deploy service role for deployment to ECS and load data from S3
+*/
+resource "aws_iam_role" "chapter-11_code_deploy_service_role" {
+  name = "chapter-11_code_deploy_service_role"
+  assume_role_policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "",
+        "Effect" : "Allow",
+        "Principal" : {
+          "Service" : "codedeploy.amazonaws.com"
+        },
+        "Action" : "sts:AssumeRole"
+      }
     ]
+  })
+  managed_policy_arns = ["arn:aws:iam::aws:policy/AmazonEC2FullAccess", "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess", "arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS"]
 }
-EOF
-    //Managed Code Deploy service policy
-    managed_policy_arns = ["arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"]
-}
-
-# 인스턴스용 보안그룹
-resource  "aws_security_group" "instance-sg"  {
-  name  =  "terraform-example-instance-sg" 
-  vpc_id = aws_vpc.my_vpc.id
-
-  ingress  { 
-    from_port    =  80
-    to_port      =  80
-    protocol     =  "tcp"
-    cidr_blocks  =  [ "0.0.0.0/0" ] 
-  }
-  ingress  { 
-    from_port    =  22
-    to_port      =  22
-    protocol     =  "tcp"
-    cidr_blocks  =  [ "0.0.0.0/0" ] 
-  }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+/**
+* Code deploy service role for code build to ECS and load data from S3
+*/
+resource "aws_iam_role" "chapter-11_code_build_service_role" {
+  name = "chapter-11_code_build_service_role"
+  assume_role_policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "",
+        "Effect" : "Allow",
+        "Principal" : {
+          "Service" : "codebuild.amazonaws.com"
+        },
+        "Action" : "sts:AssumeRole"
+      }
+    ]
+  })
+  managed_policy_arns = ["arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess", "arn:aws:iam::aws:policy/AmazonS3FullAccess", "arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilderECRContainerBuilds", "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"]
 }
 
-# IAM instance profile to attache the code deploy agent role
-resource "aws_iam_instance_profile" "instance_profile" {
-  name = "deploy_instance_profile"
-  role = aws_iam_role.deploy_agent_role.name
+
+
+/**
+* Application Load Balancer to front face traffic for the ECS service
+*/
+resource "aws_alb" "chapter-11_alb" {
+  name               = "chapter-11-alb"
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.chapter-11_lb_sg.id]
+  subnets            = var.subnets
 }
 
-# Launch Template 생성
-resource "aws_launch_template" "my_launch_template" {
-  name_prefix   = "my-launch-template"
-  image_id      = "ami-0ab3794db9457b60a" # Amazonlinux2023
-  instance_type = "t2.micro" # 인스턴스 타입 설정
-  vpc_security_group_ids = [aws_security_group.instance-sg.id]
-  key_name      = "deploy-demo-keypair"
-  user_data = filebase64("user_data.sh")
-  iam_instance_profile {
-    name = aws_iam_instance_profile.instance_profile.name
-  }
-  tags = {
-    managedby = "terraform"
+/**
+* Application Load Balancer listener to connect on port 80
+*/
+resource "aws_alb_listener" "chapter-11_alb_listner" {
+  load_balancer_arn = aws_alb.chapter-11_alb.arn
+  port              = 80
+  default_action {
+    target_group_arn = aws_alb_target_group.chapter-11_blue_alb_tgt_group.arn
+    type             = "forward"
   }
 }
-
-# autoscaling group
-resource "aws_autoscaling_group" "example" {
-  launch_template {
-    id      = aws_launch_template.my_launch_template.id
-    version = "$Latest"
-  }
-  vpc_zone_identifier = [aws_subnet.my_subnet_a.id, aws_subnet.my_subnet_c.id]
-  target_group_arns = [aws_lb_target_group.asg.arn]
-  min_size = 1
-  desired_capacity   = 2
-  max_size = 3
-  desired_capacity   = 2
-  health_check_type = "ELB"
-  tag {
-    key = "Name"
-    value = "terraform-asg-example"
-    propagate_at_launch = true
+/**
+* Application load balancer BLUE target group for ECS
+*/
+resource "aws_alb_target_group" "chapter-11_blue_alb_tgt_group" {
+  port        = 80
+  target_type = "ip"
+  vpc_id      = var.vpc_id
+  name        = "chapter-11-blue-alb-tgt-group"
+  protocol    = "HTTP"
+  health_check {
+    protocol = "HTTP"
+    path     = "/"
   }
 }
 
 
-# 보안 그룹 생성
-resource "aws_security_group" "elb_sg" {
-  name        = "elb_sg"
-  description = "Allow inbound traffic on port 80"
-  vpc_id      = aws_vpc.my_vpc.id
+/**
+* Application load balancer GREEN target group for ECS
+*/
 
+resource "aws_alb_target_group" "chapter-11_green_alb_tgt_group" {
+  port        = 80
+  target_type = "ip"
+  vpc_id      = var.vpc_id
+  name        = "chapter-11-green-alb-tgt-group"
+  protocol    = "HTTP"
+  health_check {
+    protocol = "HTTP"
+    path     = "/"
+  }
+}
+
+/**
+* Application Load Balancer TEST listener to connect on port 8080 
+* to test traffic before live.
+*
+*/
+/*
+resource "aws_alb_listener" "chapter-11_green_alb_listner" {
+  load_balancer_arn = aws_alb.chapter-11_alb.arn
+  port              = 8080
+  default_action {
+    target_group_arn = aws_alb_target_group.chapter-11_green_alb_tgt_group.arn
+    type             = "forward"
+  }
+}
+*/
+
+/**
+* Security group for Load Balancer to provide access to 
+* http traffic on port 80 and 8080
+*
+*/
+resource "aws_security_group" "chapter-11_lb_sg" {
+  description = "Security group for load balancer Http access"
+  name        = "chapter-11-load-balancer-security-group"
   ingress {
+    description = "Http access"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
+  ingress {
+    description = "Http access"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
   egress {
     from_port   = 0
     to_port     = 0
-    protocol    = "-1"
+    protocol    = -1
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
 
+/*
+*
+* ECS Cluster configuration
+*/
+resource "aws_ecs_cluster" "chapter-11_ecs_cluster" {
+  name = "chapter-11_ecs_cluster"
   tags = {
-    Name = "terraform-sg"
-    managedby = "terraform"
+    resource-group = "chapter-11"
   }
 }
 
-resource "aws_lb" "example" {
-  name = "terraform-asg-example"
-  load_balancer_type = "application"
-  subnets = [aws_subnet.my_subnet_a.id, aws_subnet.my_subnet_c.id]
-  security_groups = [aws_security_group.elb_sg.id]
-}
-
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.example.arn
-  port = 80
-  protocol = "HTTP"
-  default_action {
-    type = "forward" 
-    target_group_arn = aws_lb_target_group.asg.arn
+/*
+* ECS Cluster capacity providers, set to AWS FARGATE
+*/
+resource "aws_ecs_cluster_capacity_providers" "chapter-11_ecs_capacity_providers" {
+  cluster_name       = aws_ecs_cluster.chapter-11_ecs_cluster.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+  default_capacity_provider_strategy {
+    base              = 0
+    weight            = 1
+    capacity_provider = "FARGATE"
   }
 }
 
-resource "aws_lb_listener_rule" "asg" {
-  listener_arn = aws_lb_listener.http.arn
-  priority = 100
-  condition {
-    path_pattern {
-      values = ["*"]
+/**
+*   ECS Task definition to define containers mage, port mapping, image and FARGATE capabilities
+*/
+
+resource "aws_ecs_task_definition" "chapter-11_task_definition" {
+  family                   = "chapter-11_task_definition"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 512
+  memory                   = 3072
+  execution_role_arn       = "arn:aws:iam::279522866734:role/ecsTaskExecutionRole"
+  container_definitions = jsonencode([
+    {
+      name      = "chapter-11_aws_code_pipeline_container"
+      image     = var.container_image_uri
+      cpu       = 512
+      memory    = 3072
+      essential = true
+      portMappings = [
+        {
+          containerPort = 80
+          hostPort      = 80
+        }
+      ]
+    }
+  ])
+}
+
+/**
+* ECS Service configuration to run the tasks behind the load balancer and CODE_DEPLOY controller
+*/
+resource "aws_ecs_service" "chapter-11_ecs_service" {
+  name            = "chapter-11_ecs_service"
+  cluster         = aws_ecs_cluster.chapter-11_ecs_cluster.id
+  task_definition = aws_ecs_task_definition.chapter-11_task_definition.arn
+  desired_count   = 1
+  deployment_controller {
+    type = "CODE_DEPLOY"
+  }
+
+  network_configuration {
+    security_groups  = [aws_security_group.chapter-11_lb_sg.id]
+    subnets          = var.subnets
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_alb_target_group.chapter-11_blue_alb_tgt_group.arn
+    container_name   = "chapter-11_aws_code_pipeline_container"
+    container_port   = "80"
+  }
+}
+
+
+/**
+* AWS CODE DEPLOY Application for deployment to ECS
+*/
+resource "aws_codedeploy_app" "chapter-11_code_deploy_app" {
+  name             = "chapter-11_code_deploy_app"
+  compute_platform = "ECS"
+}
+
+resource "aws_codebuild_project" "chapter-11_code_maven_build" {
+  name         = "chapter-11_code_maven_build"
+  service_role = aws_iam_role.chapter-11_code_build_service_role.arn
+  description  = "Code build project to run the maven build and generate java artifacts"
+  artifacts {
+    type = "CODEPIPELINE"
+  }
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = "buildspec.yml"
+  }
+  environment {
+    compute_type = "BUILD_GENERAL1_SMALL"
+    type         = "LINUX_CONTAINER"
+    image        = "aws/codebuild/amazonlinux2-x86_64-standard:3.0"
+  }
+}
+
+resource "aws_codebuild_project" "chapter-11_docker_build" {
+  name         = "chapter-11_docker_build"
+  service_role = aws_iam_role.chapter-11_code_build_service_role.arn
+  description  = "Code build project to generate the docker image."
+
+  artifacts {
+    type      = "CODEPIPELINE"
+    packaging = "NONE"
+    location  = "s3://codepipeline-us-east-1-492193347648/test-2/"
+    path      = "chapter-11_docker_build"
+  }
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = "docker_buildspec.yml"
+  }
+  environment {
+    compute_type    = "BUILD_GENERAL1_SMALL"
+    type            = "LINUX_CONTAINER"
+    image           = "aws/codebuild/amazonlinux2-x86_64-standard:3.0"
+    privileged_mode = true
+  }
+}
+
+resource "aws_codedeploy_deployment_group" "chapter-11_code_deploy_group" {
+  app_name               = aws_codedeploy_app.chapter-11_code_deploy_app.name
+  deployment_group_name  = "chapter-11_code_deploy_group"
+  deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
+  service_role_arn       = aws_iam_role.chapter-11_code_deploy_service_role.arn
+
+  ecs_service {
+    service_name = aws_ecs_service.chapter-11_ecs_service.name
+    cluster_name = aws_ecs_cluster.chapter-11_ecs_cluster.name
+  }
+  deployment_style {
+    deployment_option = "WITH_TRAFFIC_CONTROL"
+    deployment_type   = "BLUE_GREEN"
+  }
+  blue_green_deployment_config {
+    deployment_ready_option {
+      action_on_timeout = "CONTINUE_DEPLOYMENT"
+    }
+    terminate_blue_instances_on_deployment_success {
+      termination_wait_time_in_minutes = 5
+      action                           = "TERMINATE"
     }
   }
-  action {
-    type = "forward"
-    target_group_arn = aws_lb_target_group.asg.arn
-  } 
-}
+  auto_rollback_configuration {
+    enabled = true
+    events  = ["DEPLOYMENT_FAILURE"]
+  }
 
-resource "aws_lb_target_group" "asg" {
-  name = "terraform-asg-example"
-  port = 80
-  protocol = "HTTP"
-  vpc_id = aws_vpc.my_vpc.id
-  health_check {
-    path = "/"
-    protocol = "HTTP"
-  #   matcher = "200"
-  #   interval = 15
-  #   timeout = 3
-  #   healthy_threshold = 2
-  #   unhealthy_threshold = 2
+  load_balancer_info {
+    target_group_pair_info {
+      prod_traffic_route {
+        listener_arns = [aws_alb_listener.chapter-11_alb_listner.arn]
+      }
+      target_group {
+        name = aws_alb_target_group.chapter-11_blue_alb_tgt_group.name
+      }
+      target_group {
+        name = aws_alb_target_group.chapter-11_green_alb_tgt_group.name
+      }
+    }
   }
 }
 
-output "elb_dns_name" {
-  value = aws_lb.example.dns_name
+
+
+
+
+
+
+// IAM role used by the EC2 aws instance to be assumed to connect to S3 to download package
+resource "aws_iam_role" "chapter_11_test_env_deploy_agent_role" {
+  name               = "chapter_11_test_env_deploy_agent_role"
+  assume_role_policy = <<EOF
+{
+ "Version": "2012-10-17",
+ "Statement": [
+   {
+     "Action": "sts:AssumeRole",
+     "Principal": {
+       "Service": "ec2.amazonaws.com"
+     },
+     "Effect": "Allow",
+     "Sid": ""
+   }
+ ]
 }
+EOF
+}
+
+
+
+//IAM policy to provide access to S3
+resource "aws_iam_policy" "chapter_11_test_env_deploy_policy" {
+  name   = "chapter-11-test-env-deploy-policy"
+  policy = file("code-deploy-policy.json")
+}
+
+//IAM EC2 Role and S3 Policy association
+resource "aws_iam_policy_attachment" "chapter_11_test_env_deploy_policy_attach" {
+  name       = "chapter-11-deploy-policy-attach"
+  policy_arn = aws_iam_policy.chapter_11_test_env_deploy_policy.arn
+  roles      = [aws_iam_role.chapter_11_test_env_deploy_agent_role.name]
+}
+
+// IAM instance profile to attache the code deploy agent role
+resource "aws_iam_instance_profile" "chapter_11_test_env_instance_profile" {
+  name = "chapter_11_test_env_deploy_instance_profile"
+  role = aws_iam_role.chapter_11_test_env_deploy_agent_role.name
+}
+
+// EC2 Auto scalling Group 
+resource "aws_autoscaling_group" "chapter_11_test_env_asg" {
+  name               = "chapter-11_test_asg"
+  min_size           = 1
+  max_size           = 2
+  desired_capacity   = 2
+  availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+  launch_template {
+    id      = aws_launch_template.chapter_11_test_env_ec2_launch_template.id
+    version = "$Latest"
+  }
+  health_check_type = "ELB"
+}
+
+//EC2 Launch template to create EC2 instances , change Image ID and key name 
+resource "aws_launch_template" "chapter_11_test_env_ec2_launch_template" {
+  instance_type = "t2.micro"
+  image_id      = "ami-0ed9277fb7eb570c9"
+  name          = "chapter-11-ec2-launch-template"
+  key_name      = "packt_key"
+  iam_instance_profile {
+    name = aws_iam_instance_profile.chapter_11_test_env_instance_profile.name
+  }
+  security_group_names = [aws_security_group.chapter-11_lb_sg.name]
+  user_data            = filebase64("user_data.sh")
+}
+
+// EC2 Load Balancer 
+resource "aws_alb" "chapter_11_test_env_alb" {
+  name               = "chapter-11-test-alb"
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.chapter-11_lb_sg.id]
+  subnets            = var.subnets
+}
+
+//Application Load Balancer listener to connect on port 80
+resource "aws_alb_listener" "chapter_11_test_env_alb_listner" {
+  load_balancer_arn = aws_alb.chapter_11_test_env_alb.arn
+  port              = 80
+  default_action {
+    target_group_arn = aws_alb_target_group.chapter_11_test_env_alb_tgt_group.arn
+    type             = "forward"
+  }
+}
+
+// Aapplication load balancer target group , to detect EC2 instances running on port 80
+resource "aws_alb_target_group" "chapter_11_test_env_alb_tgt_group" {
+  port        = 80
+  target_type = "instance"
+  vpc_id      = var.vpc_id
+  name        = "chapter-11-test-alb-tgt-group"
+  protocol    = "HTTP"
+  health_check {
+    protocol = "HTTP"
+    path     = "/"
+  }
+}
+
+// Security group for EC2 instance to provide access to http,https and ssh port 
+/*resource "aws_security_group" "chapter_11_test_env_ins_sg" {
+  description = "security group for http/https and ssh access"
+  name        = "chapter-11-instance-security-group"
+  ingress {
+    description = "Http access"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "Https access"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "ssh address"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = -1
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}*/
+
+resource "aws_codedeploy_app" "chapter_11_test_env_app" {
+  compute_platform = "Server"
+  name             = "chapter_11_test_env_app"
+}
+
+resource "aws_codedeploy_deployment_group" "chapter_11_test_env_deploy_group" {
+  deployment_group_name = "chapter_11_test_env_deploy_group"
+  app_name              = aws_codedeploy_app.chapter_11_test_env_app.name
+  service_role_arn      = aws_iam_role.chapter-11_code_deploy_service_role.arn
+  autoscaling_groups    = [aws_autoscaling_group.chapter_11_test_env_asg.name]
+  deployment_style {
+    deployment_type = "IN_PLACE"
+  }
+  load_balancer_info {
+    target_group_info {
+      name = aws_alb.chapter_11_test_env_alb.name
+    }
+  }
+}
+
+

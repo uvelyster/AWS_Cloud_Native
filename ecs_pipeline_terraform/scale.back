@@ -1,0 +1,66 @@
+
+# Launch Template 생성
+resource "aws_launch_template" "my_launch_template" {
+  name_prefix   = "my-launch-template"
+  image_id      = "ami-0ab3794db9457b60a" # Amazonlinux2023
+  instance_type = "t2.micro" # 인스턴스 타입 설정
+  vpc_security_group_ids = [aws_security_group.instance-sg.id]
+  key_name      = "deploy-demo-keypair"
+  user_data = filebase64("user_data.sh")
+  iam_instance_profile {
+    name = aws_iam_instance_profile.instance_profile.name
+  }
+  tags = {
+    managedby = "terraform"
+  }
+}
+
+# autoscaling group
+resource "aws_autoscaling_group" "example" {
+  launch_template {
+    id      = aws_launch_template.my_launch_template.id
+    version = "$Latest"
+  }
+  vpc_zone_identifier = [aws_subnet.my_subnet_a.id, aws_subnet.my_subnet_c.id]
+  target_group_arns = [aws_alb_target_group.asg.arn]
+  min_size = 1
+  desired_capacity   = 2
+  max_size = 3
+  health_check_type = "ELB"
+  tag {
+    key = "Name"
+    value = "terraform-asg-example"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_alb" "example" {
+  name = "terraform-asg-example"
+  load_balancer_type = "application"
+  subnets = [aws_subnet.my_subnet_a.id, aws_subnet.my_subnet_c.id]
+  security_groups = [aws_security_group.elb_sg.id]
+}
+
+resource "aws_alb_listener" "http" {
+  load_balancer_arn = aws_alb.example.arn
+  port = 80
+  protocol = "HTTP"
+  default_action {
+    type = "forward" 
+    target_group_arn = aws_alb_target_group.asg.arn
+  }
+}
+
+resource "aws_alb_listener_rule" "asg" {
+  listener_arn = aws_alb_listener.http.arn
+  priority = 100
+  condition {
+    path_pattern {
+      values = ["*"]
+    }
+  }
+  action {
+    type = "forward"
+    target_group_arn = aws_alb_target_group.asg.arn
+  } 
+}
